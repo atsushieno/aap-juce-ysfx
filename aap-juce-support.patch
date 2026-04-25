@@ -1,0 +1,106 @@
+diff --git a/cmake.plugin.txt b/cmake.plugin.txt
+index a841b6e..7eef799 100644
+--- a/cmake.plugin.txt
++++ b/cmake.plugin.txt
+@@ -39,6 +39,11 @@ if(YSFX_PLUGIN_VST3_SDK_PATH)
+     juce_set_vst3_sdk_path("${YSFX_PLUGIN_VST3_SDK_PATH}")
+ endif()
+ 
++# AAP: register aap_audio_processors as a JUCE module (must be after JUCE is loaded).
++if(DEFINED AAP_JUCE_DIR)
++    juce_add_modules(${AAP_JUCE_DIR}/aap-modules/aap_audio_processors)
++endif()
++
+ add_subdirectory(thirdparty/clap-juce-extensions EXCLUDE_FROM_ALL)
+ 
+ function(add_new_target target_name is_synth)
+@@ -48,23 +53,25 @@ function(add_new_target target_name is_synth)
+         set(CLAP_SUFFIX "")
+         set(CATEGORY "Instrument")
+         set(CLAP_TYPE "instrument")
++        set(_AAP_PRODUCT_NAME "ysfx_instrument")
+     else()
+         set(SUFFIX " FX")
+         set(CODE_END "z")
+         set(CLAP_SUFFIX "-fx")
+         set(CATEGORY "Fx")
+         set(CLAP_TYPE "audio-effect")
++        set(_AAP_PRODUCT_NAME "ysfx_fx")
+     endif()
+ 
+     juce_add_plugin("${target_name}"
+         PLUGIN_CODE "ysf${CODE_END}"
+         PLUGIN_MANUFACTURER_CODE "S4IK"
+-        PRODUCT_NAME "ysfx-s${SUFFIX}"
++        PRODUCT_NAME "${_AAP_PRODUCT_NAME}"
+         JUCE_PLUGIN_NAME "ysfx-s${SUFFIX}"
+         JUCE_DESCRIPTION "Host for JSFX plugins"
+         COMPANY_NAME "Jean Pierre Cimalando / Joep Vanlier"
+         BUNDLE_ID "Jean_Pierre_Cimalando__Joep_Vanlier"
+-        FORMATS VST3 AU
++        FORMATS VST3 AU Standalone
+         NEEDS_MIDI_INPUT TRUE
+         NEEDS_MIDI_OUTPUT TRUE
+         NEEDS_CURL FALSE
+@@ -87,7 +94,7 @@ function(add_new_target target_name is_synth)
+             "plugin/info.cpp"
+             "plugin/info.h"
+             "plugin/bank_io.cpp"
+-            "plugin/bank_io.h"            
++            "plugin/bank_io.h"
+             "plugin/components/parameters_panel.cpp"
+             "plugin/components/parameters_panel.h"
+             "plugin/components/graphics_view.cpp"
+@@ -129,6 +136,7 @@ function(add_new_target target_name is_synth)
+         ysfx::ysfx
+         json
+         juce::juce_audio_processors
++        juce::juce_audio_utils
+         juce::juce_gui_basics
+         juce::juce_gui_extra
+         juce::juce_opengl
+@@ -152,7 +160,43 @@ function(add_new_target target_name is_synth)
+         CLAP_USE_JUCE_PARAMETER_RANGES DISCRETE
+         MANUFACTURER_NAME "Sai'ke"
+         MANUFACTURER_CODE S4IK)
++
++    # AAP specifics begin -->
++    if(DEFINED AAP_DIR)
++        target_include_directories("${target_name}" PUBLIC
++            "${AAP_DIR}/include"
++            "${AAP_JUCE_DIR}/aap-modules"
++        )
++        target_compile_definitions("${target_name}" PUBLIC
++            JUCEAAP_HAVE_AUDIO_PLAYHEAD_NEW_POSITION_INFO=1
++            JUCE_PUSH_NOTIFICATIONS=1
++            JUCE_PUSH_NOTIFICATIONS_ACTIVITY="com/rmsl/juce/JuceActivity"
++        )
++        if(ANDROID)
++            find_library(log "log")
++            find_library(android "android")
++            find_library(glesv2 "GLESv2")
++            find_library(egl "EGL")
++            target_include_directories("${target_name}" PRIVATE
++                "${ANDROID_NDK}/sources/android/cpufeatures"
++            )
++            add_compile_definitions(
++                [[JUCE_ANDROID=1]]
++                [[JUCE_DONT_AUTO_OPEN_MIDI_DEVICES_ON_MOBILE=1]]
++            )
++            find_package(androidaudioplugin REQUIRED CONFIG)
++            target_link_libraries("${target_name}" PRIVATE
++                androidaudioplugin::androidaudioplugin
++            )
++        endif()
++        target_link_libraries("${target_name}" PRIVATE aap_audio_processors)
++    endif()
++    # <-- AAP specifics end
+ endfunction()
+ 
+ add_new_target(ysfx_plugin_instrument TRUE)
+-add_new_target(ysfx_plugin FALSE)
++# AAP: build only the instrument target on Android initially. Loading two JUCE
++# Standalone .so files in one APK conflicts on the JNI initialiseJUCE symbol.
++if(NOT ANDROID)
++    add_new_target(ysfx_plugin FALSE)
++endif()
