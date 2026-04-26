@@ -3,6 +3,42 @@ plugins {
     id 'kotlin-android'
 }
 
+// Bundle JSFX content from the JSFX submodules into the APK as assets, so that
+// YsfxJsfxContentInitializer (see app/src/main/.../YsfxJsfxContentInitializer.kt)
+// can extract them to a user-visible Documents directory on first launch.
+def generatedAssets = "$buildDir/generated-assets"
+def jsfxAssetRoot   = "$generatedAssets/jsfx"
+def jsfxSources = [
+        "geraintluff-jsfx": "$projectDir/../external/geraintluff-jsfx",
+        "Saike-jsfx"      : "$projectDir/../external/Saike-jsfx",
+]
+
+task bundleJsfxContent {
+    description = "Stage JSFX content from submodules into APK assets/jsfx/<source>/."
+    jsfxSources.values().each { inputs.dir it }
+    outputs.dir jsfxAssetRoot
+    doLast {
+        delete jsfxAssetRoot
+        jsfxSources.each { name, src ->
+            def srcDir = new File(src)
+            if (!srcDir.exists()) {
+                logger.warn("bundleJsfxContent: $src does not exist; did you `git submodule update --init --recursive`?")
+                return
+            }
+            copy {
+                from(srcDir) {
+                    exclude '.git/**', '.github/**', '.gitignore', '.gitmodules'
+                }
+                into "$jsfxAssetRoot/$name"
+            }
+        }
+    }
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn bundleJsfxContent
+}
+
 android {
     namespace "org.androidaudioplugin.ports.juce.ysfx"
     compileSdk = libs.versions.android.compileSdk.get().toInteger()
@@ -38,6 +74,7 @@ android {
              "../external/aap-juce/java"]
         main.res.srcDirs +=
             []
+        main.assets.srcDirs += [generatedAssets]
     }
 
     dependencies {
