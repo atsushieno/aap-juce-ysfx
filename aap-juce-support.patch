@@ -104,3 +104,270 @@ index a841b6e..7eef799 100644
 +if(NOT ANDROID)
 +    add_new_target(ysfx_plugin FALSE)
 +endif()
+diff --git a/plugin/components/dialogs.cpp b/plugin/components/dialogs.cpp
+index 08b977b..1a158cf 100644
+--- a/plugin/components/dialogs.cpp
++++ b/plugin/components/dialogs.cpp
+@@ -3,6 +3,15 @@
+ 
+ juce::AlertWindow* show_async_text_input(juce::String title, juce::String message, std::function<void(juce::String, bool)> callback, std::optional<std::function<juce::String(juce::String)>> validator, juce::Component* parent)
+ {
++   #if JUCE_ANDROID
++    // AAP: juce::AlertWindow is a TopLevelWindow and adds itself to the
++    // desktop on construction. Inside AudioPluginViewService there is no
++    // Activity to host the desktop peer, so the dialog crashes. Skip the
++    // dialog and signal cancellation to the caller.
++    juce::ignoreUnused(title, message, validator, parent);
++    if (callback) callback({}, false);
++    return nullptr;
++   #else
+     auto* window = new juce::AlertWindow(title, message, juce::AlertWindow::NoIcon);
+     window->addTextEditor("textField", "", "");
+     juce::TextEditor* textEditor = window->getTextEditor("textField");
+@@ -49,11 +58,19 @@ juce::AlertWindow* show_async_text_input(juce::String title, juce::String messag
+     }
+ 
+     return window;
++   #endif
+ }
+ 
+ 
+ juce::AlertWindow* show_option_window(juce::String title, juce::String message, std::vector<juce::String> buttons, std::function<void(int result)> callback, juce::Component* parent)
+ {
++   #if JUCE_ANDROID
++    // AAP: same desktop-peer constraint as show_async_text_input. Signal a
++    // cancel/no-op result (0 = first button index in this dialog convention).
++    juce::ignoreUnused(title, message, buttons, parent);
++    if (callback) callback(0);
++    return nullptr;
++   #else
+     auto* window = new juce::AlertWindow(title, message, juce::AlertWindow::NoIcon);
+     window->setMessage(message);
+ 
+@@ -81,4 +98,5 @@ juce::AlertWindow* show_option_window(juce::String title, juce::String message,
+     }
+ 
+     return window;
++   #endif
+ }
+diff --git a/plugin/components/ide_view.cpp b/plugin/components/ide_view.cpp
+index 65e77bd..83d6be5 100644
+--- a/plugin/components/ide_view.cpp
++++ b/plugin/components/ide_view.cpp
+@@ -291,6 +291,11 @@ void YsfxIDEView::Impl::saveAs()
+     if (m_fileChooserActive) return;
+     if (m_currentEditorIndex >= m_editors.size()) return;
+ 
++   #if JUCE_ANDROID
++    // AAP: juce::FileChooser::launchAsync requires an Activity, not available
++    // inside AudioPluginViewService.
++    return;
++   #else
+     auto editor = m_editors[m_currentEditorIndex];
+     juce::File initialPath = editor->getPath().getParentDirectory();
+ 
+@@ -324,6 +329,7 @@ void YsfxIDEView::Impl::saveAs()
+             m_fileChooserActive = false;
+         }
+     );
++   #endif
+ }
+ 
+ void YsfxIDEView::Impl::saveCurrentFile()
+@@ -589,6 +595,10 @@ void YsfxIDEView::Impl::tabPopup(int tabIndex)
+     
+     juce::PopupMenu::Options popupOptions = juce::PopupMenu::Options{}
+     .withTargetComponent(*tab);
++   #if JUCE_ANDROID
++    if (auto* parent = m_self->getTopLevelComponent())
++        popupOptions = popupOptions.withParentComponent(parent);
++   #endif
+ 
+     m_tabPopup.reset(new juce::PopupMenu);
+ 
+diff --git a/plugin/components/rpl_view.cpp b/plugin/components/rpl_view.cpp
+index d311ae2..47e8816 100644
+--- a/plugin/components/rpl_view.cpp
++++ b/plugin/components/rpl_view.cpp
+@@ -154,9 +154,13 @@ class BankItemsListBoxModel final : public juce::ListBox, public juce::ListBoxMo
+ 
+                 juce::PopupMenu::Options presetOptions = juce::PopupMenu::Options{}
+                     .withTargetComponent(getComponentForRowNumber(row));
+-                
++               #if JUCE_ANDROID
++                if (auto* parent = getTopLevelComponent())
++                    presetOptions = presetOptions.withParentComponent(parent);
++               #endif
++
+                 m_itemMenu->addItem(1, "Rename");
+-                
++
+                 m_itemMenu->showMenuAsync(presetOptions, [this, row](int index) {
+                     if (index == 1) {
+                         m_renameCallback(row);
+@@ -248,6 +252,10 @@ class LoadedBank : public juce::Component, public juce::DragAndDropContainer {
+         }
+ 
+         void chooseFileAndLoad() {
++           #if JUCE_ANDROID
++            // AAP: juce::FileChooser::launchAsync requires an Activity.
++            return;
++           #else
+             juce::File initialPath;
+             if (m_file != juce::File{}) {
+                 initialPath = m_file.getParentDirectory();
+@@ -262,6 +270,7 @@ class LoadedBank : public juce::Component, public juce::DragAndDropContainer {
+                     }
+                 }
+             );
++           #endif
+         }
+ 
+         void closeFile() {
+diff --git a/plugin/components/searchable_popup.h b/plugin/components/searchable_popup.h
+index 382c2ba..b586602 100644
+--- a/plugin/components/searchable_popup.h
++++ b/plugin/components/searchable_popup.h
+@@ -641,6 +641,12 @@
+ 
+             void showQuickSearch()
+             {
++               #if JUCE_ANDROID
++                // AAP: quick_search relies on addToDesktop(), which has no
++                // Activity-backed peer inside AudioPluginViewService. Skip the
++                // quick-search overlay on Android.
++                return;
++               #else
+                 if (quick_search == nullptr && target_component_weak_ref)
+                 {
+                     float scale_factor = juce::Component::getApproximateScaleFactorForComponent(options.getTargetComponent());
+@@ -655,6 +661,7 @@
+                     // quick_search->toFront(true /* shouldAlsoGainFocus */);
+                     quick_search->enterModalState (true);
+                 }
++               #endif
+             }
+ 
+             // called by PopupMenu::showMenuAsync it has completed
+diff --git a/plugin/editor.cpp b/plugin/editor.cpp
+index 8684cb3..18c4042 100644
+--- a/plugin/editor.cpp
++++ b/plugin/editor.cpp
+@@ -118,11 +118,15 @@ struct YsfxEditor::Impl {
+                                 } else {
+                                     if (isAlwaysOnTop()) {
+                                         setAlwaysOnTop(false);
+-            
++
++                                       #if ! JUCE_ANDROID
++                                        // AAP: addToDesktop() is unsafe inside AudioPluginViewService
++                                        // since there is no Activity / desktop peer.
+                                         // Questionable windows fix
+                                         auto oldFlags = this->getPeer()->getStyleFlags();
+                                         removeFromDesktop();
+                                         this->addToDesktop(oldFlags);
++                                       #endif
+                                     }
+                                 }
+                             }
+@@ -588,13 +592,19 @@ void YsfxEditor::Impl::chooseFileAndLoad()
+ 
+     bool normalLoad = (m_proc->retryLoad() == RetryState::ok);
+ 
++   #if JUCE_ANDROID
++    // AAP: juce::FileChooser::launchAsync requires an Activity, which is not
++    // available inside AudioPluginViewService. Skip the file picker on Android.
++    juce::ignoreUnused(initialPath, fx, normalLoad);
++    return;
++   #else
+     if (normalLoad) {
+         m_fileChooser.reset(new juce::FileChooser(TRANS("Open jsfx..."), initialPath, juce::String(), m_useNativeFilePicker));
+     } else {
+         juce::File fullpath{m_proc->lastLoadPath()};
+         m_fileChooser.reset(new juce::FileChooser(TRANS("JSFX missing! Please locate jsfx named ") + fullpath.getFileNameWithoutExtension(), fullpath.getParentDirectory(), fullpath.getFileName(), m_useNativeFilePicker));
+     }
+-    
++
+     bool mustAskConfirmation = normalLoad && ysfx_is_compiled(fx);
+     m_fileChooserActive = true;
+     m_fileChooser->launchAsync(
+@@ -614,6 +624,7 @@ void YsfxEditor::Impl::chooseFileAndLoad()
+             m_fileChooserActive = false;
+         }
+     );
++   #endif
+ }
+ 
+ void YsfxEditor::Impl::saveScaling()
+@@ -716,7 +727,12 @@ void YsfxEditor::Impl::popupRecentFiles()
+ 
+     juce::PopupMenu::Options popupOptions = juce::PopupMenu::Options{}
+         .withTargetComponent(*m_btnRecentFiles);
+-    
++   #if JUCE_ANDROID
++    // AAP: anchor the popup inside the plugin editor so it does not try to use
++    // a desktop peer (no Activity inside AudioPluginViewService).
++    popupOptions = popupOptions.withParentComponent(m_self);
++   #endif
++
+     m_recentFilesPopup->showMenuAsync(popupOptions, [this, recent](int index) {
+         if (index != 0) {
+             juce::File selectedFile = recent.getFile(index - 100);
+@@ -739,6 +755,9 @@ void YsfxEditor::Impl::popupRecentOpts()
+ 
+     juce::PopupMenu::Options popupOptions = juce::PopupMenu::Options{}
+         .withTargetComponent(*m_btnRecentFilesOpts);
++   #if JUCE_ANDROID
++    popupOptions = popupOptions.withParentComponent(m_self);
++   #endif
+ 
+     juce::RecentlyOpenedFilesList recent = loadRecentFiles();
+     recent.createPopupMenuItems(*m_recentFilesOptsSubmenuPopup, 100, false, true);
+@@ -803,6 +822,9 @@ void YsfxEditor::Impl::popupPresetOptions()
+ 
+     juce::PopupMenu::Options popupOptions = juce::PopupMenu::Options{}
+         .withTargetComponent(*m_btnPresetOpts);
++   #if JUCE_ANDROID
++    popupOptions = popupOptions.withParentComponent(m_self);
++   #endif
+ 
+     m_presetsOptsPopup->showMenuAsync(
+         popupOptions, [this, info](int index) 
+@@ -933,6 +955,12 @@ void YsfxEditor::Impl::switchEditor(bool showGfx)
+ 
+ void YsfxEditor::Impl::openCodeEditor()
+ {
++   #if JUCE_ANDROID
++    // AAP: SubWindow is a juce::DocumentWindow which adds itself to the
++    // desktop. There is no Activity / desktop peer inside AudioPluginViewService,
++    // so opening the code editor as a separate window crashes. Skip on Android.
++    return;
++   #else
+     if (!m_codeWindow) {
+         m_codeWindow.reset(new SubWindow(TRANS("Edit"), m_self->findColour(juce::DocumentWindow::backgroundColourId), juce::DocumentWindow::allButtons, true, m_windowBehaviour));
+         m_codeWindow->setResizable(true, false);
+@@ -942,10 +970,16 @@ void YsfxEditor::Impl::openCodeEditor()
+     m_codeWindow->setVisible(true);
+     m_codeWindow->toFront(true);
+     m_ideView->focusOnCodeEditor();
++   #endif
+ }
+ 
+ void YsfxEditor::Impl::openPresetWindow()
+ {
++   #if JUCE_ANDROID
++    // AAP: SubWindow / DocumentWindow can't be added to a desktop peer inside
++    // AudioPluginViewService. Skip the preset manager window on Android.
++    return;
++   #else
+     if (!m_presetWindow) {
+         m_presetWindow.reset(new SubWindow(TRANS("Preset Manager"), m_self->findColour(juce::DocumentWindow::backgroundColourId), juce::DocumentWindow::allButtons, true, m_windowBehaviour));
+         m_presetWindow->setResizable(true, false);
+@@ -974,6 +1008,7 @@ void YsfxEditor::Impl::openPresetWindow()
+ 
+     m_presetWindow->setVisible(true);
+     m_presetWindow->toFront(true);
++   #endif
+ }
+ 
+ juce::RecentlyOpenedFilesList YsfxEditor::Impl::loadRecentFiles()

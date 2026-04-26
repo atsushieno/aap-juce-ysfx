@@ -10,3 +10,15 @@
 [submodule "external/JUCE"]
 	path = external/JUCE
 	url = https://github.com/juce-framework/JUCE.git
+[submodule "external/jsfx"]
+	path = external/jsfx
+	url = https://github.com/geraintluff/jsfx
+[submodule "external/geraintluff-jsfx"]
+	path = external/geraintluff-jsfx
+	url = https://github.com/geraintluff/jsfx
+[submodule "external/Saike-jsfx"]
+	path = external/Saike-jsfx
+	url = https://github.com/JoepVanlier/JSFX
+[submodule "external/tilr_jsfx"]
+	path = external/tilr_jsfx
+	url = https://github.com/tiagolr/tilr_jsfx
