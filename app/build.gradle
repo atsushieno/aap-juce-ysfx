@@ -11,6 +11,7 @@ def jsfxAssetRoot   = "$generatedAssets/jsfx"
 def jsfxSources = [
         "geraintluff-jsfx": "$projectDir/../external/geraintluff-jsfx",
         "Saike-jsfx"      : "$projectDir/../external/Saike-jsfx",
+        "tilr_jsfx"       : "$projectDir/../external/tilr_jsfx",
 ]
 
 task bundleJsfxContent {
