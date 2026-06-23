@@ -3,7 +3,7 @@
 <plugins xmlns="urn:org.androidaudioplugin.core">
   <plugin name="ysfx instrument AAP" category="Instrument"
       developer="Jean Pierre Cimalando / Joep Vanlier / AAP Porting Project"
-      unique-id="juceaap:79736679"
+      unique-id="juceaap:ysfx-s-instrument"
       library="libysfx_plugin_instrument_Standalone.so"
       entrypoint="GetJuceAAPFactoryStandalone"
       gui:ui-view-factory="org.androidaudioplugin.juce.JuceAudioPluginViewFactory"

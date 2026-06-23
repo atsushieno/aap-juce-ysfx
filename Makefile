@@ -8,7 +8,11 @@ APP_SRC_DIR=$(PWD)/external/ysfx
 JUCE_DIR=$(PWD)/external/JUCE
 
 # CMake target name for the instrument plugin; SharedCode lib follows JUCE convention.
-APP_SHARED_CODE_LIBS="ysfx_plugin_instrument_artefacts/libysfx_plugin_instrument_SharedCode.a"
+APP_SHARED_CODE_LIBS= \
+	ysfx_plugin_instrument_artefacts/libysfx_plugin_SharedCode.a |
+	ysfx_plugin_instrument_artefacts/libysfx_plugin_instrument_SharedCode.a
+
+APP_MODULE_DIRS=ysfx-s-fx ysfx-s-instrument
 
 PATCH_FILE=$(PWD)/aap-juce-support.patch
 PATCH_DEPTH=1

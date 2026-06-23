@@ -1,5 +1,5 @@
 diff --git a/cmake.plugin.txt b/cmake.plugin.txt
-index a841b6e..7eef799 100644
+index a841b6e..0fe7dee 100644
 --- a/cmake.plugin.txt
 +++ b/cmake.plugin.txt
 @@ -39,6 +39,11 @@ if(YSFX_PLUGIN_VST3_SDK_PATH)
@@ -59,7 +59,7 @@ index a841b6e..7eef799 100644
          juce::juce_gui_basics
          juce::juce_gui_extra
          juce::juce_opengl
-@@ -152,7 +160,43 @@ function(add_new_target target_name is_synth)
+@@ -152,6 +160,38 @@ function(add_new_target target_name is_synth)
          CLAP_USE_JUCE_PARAMETER_RANGES DISCRETE
          MANUFACTURER_NAME "Sai'ke"
          MANUFACTURER_CODE S4IK)
@@ -98,12 +98,6 @@ index a841b6e..7eef799 100644
  endfunction()
  
  add_new_target(ysfx_plugin_instrument TRUE)
--add_new_target(ysfx_plugin FALSE)
-+# AAP: build only the instrument target on Android initially. Loading two JUCE
-+# Standalone .so files in one APK conflicts on the JNI initialiseJUCE symbol.
-+if(NOT ANDROID)
-+    add_new_target(ysfx_plugin FALSE)
-+endif()
 diff --git a/plugin/components/dialogs.cpp b/plugin/components/dialogs.cpp
 index 08b977b..1a158cf 100644
 --- a/plugin/components/dialogs.cpp
@@ -250,10 +244,23 @@ index 382c2ba..b586602 100644
  
              // called by PopupMenu::showMenuAsync it has completed
 diff --git a/plugin/editor.cpp b/plugin/editor.cpp
-index 8684cb3..18c4042 100644
+index 8684cb3..c813e03 100644
 --- a/plugin/editor.cpp
 +++ b/plugin/editor.cpp
-@@ -118,11 +118,15 @@ struct YsfxEditor::Impl {
+@@ -54,6 +54,12 @@ struct YsfxEditor::Impl {
+     std::unique_ptr<juce::PopupMenu> m_recentFilesOptsSubmenuPopup;
+     std::unique_ptr<juce::PopupMenu> m_presetsPopup;
+     std::unique_ptr<juce::PopupMenu> m_presetsOptsPopup;
++   #if JUCE_ANDROID
++    // AAP: replacement for FileChooser on Load (no Activity is available
++    // inside AudioPluginViewService, so juce::FileChooser doesn't work).
++    std::unique_ptr<juce::PopupMenu> m_androidLoadPopup;
++    std::vector<juce::File> m_androidLoadFiles;
++   #endif
+     std::unique_ptr<juce::PropertiesFile> m_pluginProperties;
+     bool m_fileChooserActive = false;
+     bool m_mustResizeToGfx = true;
+@@ -118,11 +124,15 @@ struct YsfxEditor::Impl {
                                  } else {
                                      if (isAlwaysOnTop()) {
                                          setAlwaysOnTop(false);
@@ -270,14 +277,72 @@ index 8684cb3..18c4042 100644
                                      }
                                  }
                              }
-@@ -588,13 +592,19 @@ void YsfxEditor::Impl::chooseFileAndLoad()
+@@ -588,13 +598,77 @@ void YsfxEditor::Impl::chooseFileAndLoad()
  
      bool normalLoad = (m_proc->retryLoad() == RetryState::ok);
  
 +   #if JUCE_ANDROID
 +    // AAP: juce::FileChooser::launchAsync requires an Activity, which is not
-+    // available inside AudioPluginViewService. Skip the file picker on Android.
++    // available inside AudioPluginViewService. Replace it with an inline
++    // PopupMenu that walks the bundled-content directory extracted by
++    // YsfxJsfxContentInitializer (app/src/main/.../YsfxJsfxContentInitializer.kt).
 +    juce::ignoreUnused(initialPath, fx, normalLoad);
++    {
++        // This must match what context.getExternalFilesDir(DIRECTORY_DOCUMENTS)
++        // returns for our applicationId, i.e.
++        // /sdcard/Android/data/<applicationId>/files/Documents/jsfx.
++        // Derive <applicationId> at runtime rather than hardcoding it, so the
++        // same code works for every app that bundles ysfx (e.g. ysfx-s-fx and
++        // ysfx-s-instrument, whose applicationIds differ). JUCE's
++        // userApplicationDataDirectory is /data/user/0/<applicationId>, so its
++        // file name is the applicationId.
++        const juce::String applicationId =
++            juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getFileName();
++        const juce::File jsfxRoot =
++            juce::File("/sdcard/Android/data").getChildFile(applicationId).getChildFile("files/Documents/jsfx");
++
++        m_androidLoadFiles.clear();
++        m_androidLoadPopup.reset(new juce::PopupMenu);
++
++        std::function<void(juce::PopupMenu&, const juce::File&)> populate =
++            [&](juce::PopupMenu& menu, const juce::File& dir) {
++                juce::Array<juce::File> children;
++                dir.findChildFiles(children, juce::File::findFilesAndDirectories, false);
++                children.sort();
++                for (const auto& child : children) {
++                    if (child.isDirectory()) {
++                        juce::PopupMenu sub;
++                        populate(sub, child);
++                        if (sub.getNumItems() > 0)
++                            menu.addSubMenu(child.getFileName(), sub);
++                    } else if (child.hasFileExtension("jsfx")) {
++                        m_androidLoadFiles.push_back(child);
++                        menu.addItem((int) m_androidLoadFiles.size(), child.getFileNameWithoutExtension());
++                    }
++                }
++            };
++
++        if (jsfxRoot.isDirectory())
++            populate(*m_androidLoadPopup, jsfxRoot);
++
++        if (m_androidLoadFiles.empty()) {
++            m_androidLoadPopup->addItem(1, TRANS("(no JSFX files found in Documents/jsfx)"), false);
++            m_androidLoadPopup->addSeparator();
++            m_androidLoadPopup->addItem(2, TRANS("(content is extracted on first launch)"), false);
++        }
++
++        auto opts = juce::PopupMenu::Options{}
++            .withTargetComponent(*m_btnLoadFile)
++            .withParentComponent(m_self);
++
++        m_androidLoadPopup->showMenuAsync(opts, [this](int idx) {
++            if (idx > 0 && idx <= (int) m_androidLoadFiles.size()) {
++                juce::File f = m_androidLoadFiles[(size_t) (idx - 1)];
++                saveScaling();
++                loadFile(f, false);
++            }
++        });
++    }
 +    return;
 +   #else
      if (normalLoad) {
@@ -291,7 +356,7 @@ index 8684cb3..18c4042 100644
      bool mustAskConfirmation = normalLoad && ysfx_is_compiled(fx);
      m_fileChooserActive = true;
      m_fileChooser->launchAsync(
-@@ -614,6 +624,7 @@ void YsfxEditor::Impl::chooseFileAndLoad()
+@@ -614,6 +688,7 @@ void YsfxEditor::Impl::chooseFileAndLoad()
              m_fileChooserActive = false;
          }
      );
@@ -299,7 +364,7 @@ index 8684cb3..18c4042 100644
  }
  
  void YsfxEditor::Impl::saveScaling()
-@@ -716,7 +727,12 @@ void YsfxEditor::Impl::popupRecentFiles()
+@@ -716,7 +791,12 @@ void YsfxEditor::Impl::popupRecentFiles()
  
      juce::PopupMenu::Options popupOptions = juce::PopupMenu::Options{}
          .withTargetComponent(*m_btnRecentFiles);
@@ -313,7 +378,7 @@ index 8684cb3..18c4042 100644
      m_recentFilesPopup->showMenuAsync(popupOptions, [this, recent](int index) {
          if (index != 0) {
              juce::File selectedFile = recent.getFile(index - 100);
-@@ -739,6 +755,9 @@ void YsfxEditor::Impl::popupRecentOpts()
+@@ -739,6 +819,9 @@ void YsfxEditor::Impl::popupRecentOpts()
  
      juce::PopupMenu::Options popupOptions = juce::PopupMenu::Options{}
          .withTargetComponent(*m_btnRecentFilesOpts);
@@ -323,7 +388,7 @@ index 8684cb3..18c4042 100644
  
      juce::RecentlyOpenedFilesList recent = loadRecentFiles();
      recent.createPopupMenuItems(*m_recentFilesOptsSubmenuPopup, 100, false, true);
-@@ -803,6 +822,9 @@ void YsfxEditor::Impl::popupPresetOptions()
+@@ -803,6 +886,9 @@ void YsfxEditor::Impl::popupPresetOptions()
  
      juce::PopupMenu::Options popupOptions = juce::PopupMenu::Options{}
          .withTargetComponent(*m_btnPresetOpts);
@@ -333,7 +398,7 @@ index 8684cb3..18c4042 100644
  
      m_presetsOptsPopup->showMenuAsync(
          popupOptions, [this, info](int index) 
-@@ -933,6 +955,12 @@ void YsfxEditor::Impl::switchEditor(bool showGfx)
+@@ -933,6 +1019,12 @@ void YsfxEditor::Impl::switchEditor(bool showGfx)
  
  void YsfxEditor::Impl::openCodeEditor()
  {
@@ -346,7 +411,7 @@ index 8684cb3..18c4042 100644
      if (!m_codeWindow) {
          m_codeWindow.reset(new SubWindow(TRANS("Edit"), m_self->findColour(juce::DocumentWindow::backgroundColourId), juce::DocumentWindow::allButtons, true, m_windowBehaviour));
          m_codeWindow->setResizable(true, false);
-@@ -942,10 +970,16 @@ void YsfxEditor::Impl::openCodeEditor()
+@@ -942,10 +1034,16 @@ void YsfxEditor::Impl::openCodeEditor()
      m_codeWindow->setVisible(true);
      m_codeWindow->toFront(true);
      m_ideView->focusOnCodeEditor();
@@ -363,7 +428,7 @@ index 8684cb3..18c4042 100644
      if (!m_presetWindow) {
          m_presetWindow.reset(new SubWindow(TRANS("Preset Manager"), m_self->findColour(juce::DocumentWindow::backgroundColourId), juce::DocumentWindow::allButtons, true, m_windowBehaviour));
          m_presetWindow->setResizable(true, false);
-@@ -974,6 +1008,7 @@ void YsfxEditor::Impl::openPresetWindow()
+@@ -974,6 +1072,7 @@ void YsfxEditor::Impl::openPresetWindow()
  
      m_presetWindow->setVisible(true);
      m_presetWindow->toFront(true);

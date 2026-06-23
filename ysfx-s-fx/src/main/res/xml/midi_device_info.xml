@@ -1,0 +1,5 @@
+<devices>
+    <device name="ysfx-s fx" manufacturer="androidaudioplugin.org" product="ysfx-s Fx">
+        <input-port name="input" />
+    </device>
+</devices>
