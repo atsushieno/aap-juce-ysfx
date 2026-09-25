@@ -1,6 +1,5 @@
 plugins {
     id 'com.android.application'
-    id 'kotlin-android'
 }
 
 // Bundle JSFX content from the JSFX submodules into the APK as assets, so that
@@ -99,7 +98,4 @@ android {
     }
 
     ndkVersion libs.versions.ndk.get()
-    kotlinOptions {
-        jvmTarget = '1.8'
-    }
 }
