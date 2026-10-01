@@ -1,5 +1,5 @@
 diff --git a/cmake.plugin.txt b/cmake.plugin.txt
-index a841b6e..284b81b 100644
+index 259fe8c..2c50d13 100644
 --- a/cmake.plugin.txt
 +++ b/cmake.plugin.txt
 @@ -39,6 +39,11 @@ if(YSFX_PLUGIN_VST3_SDK_PATH)
@@ -51,7 +51,7 @@ index a841b6e..284b81b 100644
              "plugin/components/parameters_panel.cpp"
              "plugin/components/parameters_panel.h"
              "plugin/components/graphics_view.cpp"
-@@ -129,6 +136,7 @@ function(add_new_target target_name is_synth)
+@@ -131,6 +138,7 @@ function(add_new_target target_name is_synth)
          ysfx::ysfx
          json
          juce::juce_audio_processors
@@ -59,7 +59,7 @@ index a841b6e..284b81b 100644
          juce::juce_gui_basics
          juce::juce_gui_extra
          juce::juce_opengl
-@@ -152,6 +160,36 @@ function(add_new_target target_name is_synth)
+@@ -154,6 +162,36 @@ function(add_new_target target_name is_synth)
          CLAP_USE_JUCE_PARAMETER_RANGES DISCRETE
          MANUFACTURER_NAME "Sai'ke"
          MANUFACTURER_CODE S4IK)
@@ -251,10 +251,10 @@ index 382c2ba..1bd2edd 100644
  
              // called by PopupMenu::showMenuAsync it has completed
 diff --git a/plugin/editor.cpp b/plugin/editor.cpp
-index 8684cb3..dc9b375 100644
+index a407569..4977443 100644
 --- a/plugin/editor.cpp
 +++ b/plugin/editor.cpp
-@@ -54,6 +54,12 @@ struct YsfxEditor::Impl {
+@@ -55,6 +55,12 @@ struct YsfxEditor::Impl {
      std::unique_ptr<juce::PopupMenu> m_recentFilesOptsSubmenuPopup;
      std::unique_ptr<juce::PopupMenu> m_presetsPopup;
      std::unique_ptr<juce::PopupMenu> m_presetsOptsPopup;
@@ -267,7 +267,7 @@ index 8684cb3..dc9b375 100644
      std::unique_ptr<juce::PropertiesFile> m_pluginProperties;
      bool m_fileChooserActive = false;
      bool m_mustResizeToGfx = true;
-@@ -118,11 +124,15 @@ struct YsfxEditor::Impl {
+@@ -120,11 +126,15 @@ struct YsfxEditor::Impl {
                                  } else {
                                      if (isAlwaysOnTop()) {
                                          setAlwaysOnTop(false);
@@ -284,7 +284,7 @@ index 8684cb3..dc9b375 100644
                                      }
                                  }
                              }
-@@ -588,13 +598,77 @@ void YsfxEditor::Impl::chooseFileAndLoad()
+@@ -590,13 +600,77 @@ void YsfxEditor::Impl::chooseFileAndLoad()
  
      bool normalLoad = (m_proc->retryLoad() == RetryState::ok);
  
@@ -363,7 +363,7 @@ index 8684cb3..dc9b375 100644
      bool mustAskConfirmation = normalLoad && ysfx_is_compiled(fx);
      m_fileChooserActive = true;
      m_fileChooser->launchAsync(
-@@ -614,6 +688,7 @@ void YsfxEditor::Impl::chooseFileAndLoad()
+@@ -616,6 +690,7 @@ void YsfxEditor::Impl::chooseFileAndLoad()
              m_fileChooserActive = false;
          }
      );
@@ -371,7 +371,7 @@ index 8684cb3..dc9b375 100644
  }
  
  void YsfxEditor::Impl::saveScaling()
-@@ -716,7 +791,12 @@ void YsfxEditor::Impl::popupRecentFiles()
+@@ -718,7 +793,12 @@ void YsfxEditor::Impl::popupRecentFiles()
  
      juce::PopupMenu::Options popupOptions = juce::PopupMenu::Options{}
          .withTargetComponent(*m_btnRecentFiles);
@@ -385,7 +385,7 @@ index 8684cb3..dc9b375 100644
      m_recentFilesPopup->showMenuAsync(popupOptions, [this, recent](int index) {
          if (index != 0) {
              juce::File selectedFile = recent.getFile(index - 100);
-@@ -739,6 +819,9 @@ void YsfxEditor::Impl::popupRecentOpts()
+@@ -741,6 +821,9 @@ void YsfxEditor::Impl::popupRecentOpts()
  
      juce::PopupMenu::Options popupOptions = juce::PopupMenu::Options{}
          .withTargetComponent(*m_btnRecentFilesOpts);
@@ -395,7 +395,7 @@ index 8684cb3..dc9b375 100644
  
      juce::RecentlyOpenedFilesList recent = loadRecentFiles();
      recent.createPopupMenuItems(*m_recentFilesOptsSubmenuPopup, 100, false, true);
-@@ -803,6 +886,9 @@ void YsfxEditor::Impl::popupPresetOptions()
+@@ -805,6 +888,9 @@ void YsfxEditor::Impl::popupPresetOptions()
  
      juce::PopupMenu::Options popupOptions = juce::PopupMenu::Options{}
          .withTargetComponent(*m_btnPresetOpts);
@@ -443,7 +443,31 @@ index 8684cb3..dc9b375 100644
  }
  
  juce::RecentlyOpenedFilesList YsfxEditor::Impl::loadRecentFiles()
-@@ -1332,7 +1431,7 @@ void YsfxEditor::Impl::relayoutUI()
+@@ -1263,6 +1362,15 @@ void YsfxEditor::Impl::connectUI()
+                 saveScalingFactor();
+             }
+         );
++       #if JUCE_ANDROID
++        // AAP: a CallOutBox without a parent adds itself to the desktop, which has no
++        // Activity-backed peer inside AudioPluginViewService. Anchor it in the editor instead
++        // (it then inherits the editor's scaling, so no extra transform).
++        juce::CallOutBox::launchAsynchronously(
++            std::move(editor),
++            m_btnGfxScaling->getBoundsInParent(),
++            m_self);
++       #else
+         auto scale = juce::Component::getApproximateScaleFactorForComponent(this->m_self);
+         editor->setTransform(juce::AffineTransform::scale(scale));
+ 
+@@ -1270,6 +1378,7 @@ void YsfxEditor::Impl::connectUI()
+             std::move(editor),
+             m_btnGfxScaling->getScreenBounds(),
+             nullptr);
++       #endif
+     };
+ 
+     m_ideView->onFileSaved = [this](const juce::File &file) { 
+@@ -1369,7 +1478,7 @@ void YsfxEditor::Impl::relayoutUI()
  
      int max_text_width = 0;
      for (auto line : lines) {
