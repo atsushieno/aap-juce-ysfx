@@ -15,5 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = 'ysfx'
-include ':ysfx-s-fx'
-include ':ysfx-s-instrument'
+include ':app'
